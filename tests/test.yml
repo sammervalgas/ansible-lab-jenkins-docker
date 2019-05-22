@@ -1,0 +1,10 @@
+---
+- hosts: localhost
+  remote_user: root
+  become: yes
+  vars:
+    ansible_user: sammervalgas
+    ansible_become_pass: S@mm2310
+    ansible_connection: local
+  roles:
+    - ansible-role-jenkins-docker

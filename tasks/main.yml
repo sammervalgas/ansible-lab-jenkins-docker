@@ -1,0 +1,87 @@
+---
+# tasks file for ansible-role-jenkins-docker
+- set_fact:
+    # src_image: "{{role_path}}/jenkins-setup" # for playbook
+    src_image: "{{lookup ('env','PWD')}}/jenkins-setup"
+    jenkins_image: 'jenkins-sample'
+    jenkins_tag: 1.0
+    jenkins_image_tagged: 'jenkins-sample:1.0'
+    jenkins_container_name: jenkins-app
+
+- name: Clean all
+  shell: |
+         # docker rm -f $(docker ps -qa)
+         docker rm -f {{jenkins_container_name}}
+         docker rmi {{jenkins_image_tagged}}
+         docker rmi $(docker images -a | grep '<none>' | awk '{print $3}')
+         yes | docker system prune
+         yes | docker volume prune
+         rm -rf /app/jenkins_home/*
+  register: result
+
+- name: Copy jenkins-setup into remote src
+  copy:
+    src: "{{src_image}}"
+    dest: /tmp
+    mode: 0775
+
+- name: Ensure docker image is installed
+  docker_image:
+    path: "{{src_image}}"
+    dockerfile: docker/Dockerfile
+    name: "{{jenkins_image}}"
+    tag: "{{jenkins_tag}}"
+    buildargs:
+      JENKINS_ADMIN_PASS: admin123
+
+- name: Start container
+  docker_container:
+    name: "{{jenkins_container_name}}"
+    image: "{{jenkins_image_tagged}}"
+    state: started
+    restart: yes
+    restart_policy: always
+    env:
+      HOST: jenkins.sample.com
+    volumes:
+      - /app/jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    published_ports:
+      - 8080:8080
+      - 50000:50000
+
+- name: Stop container
+  docker_container:
+    name: "{{jenkins_container_name}}"
+    state: stopped
+
+- name: "Creating dir init.groovy.d"
+  file:
+    path: /app/jenkins_home/init.groovy.d
+    state: directory
+    recurse: yes
+    mode: 0775
+
+- copy:
+    src: "{{src_image}}/jenkins/06-executors.groovy"
+    dest: /app/jenkins_home/init.groovy.d
+
+- name: Start container
+  docker_container:
+    name: "{{jenkins_container_name}}"
+    state: started
+
+- name: "wait for jenkins to come up"
+  uri:
+    url: "http://127.0.0.1:8080"
+    status_code: 200
+    # validate_certs: false
+  register: result
+  until: result.status == 200
+  retries: 10
+  delay: 5
+
+- name: "Remove dir init.groovy.d"
+  file:
+    path: /app/jenkins_home/init.groovy.d
+    state: absent
